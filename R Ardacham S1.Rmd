@@ -1,0 +1,388 @@
+---
+title: "Memoire S1"
+output: html_document
+date: "2026-01-14"
+---
+
+***ARDACHAM MAHAMAT TEGUENE***
+**Etudiant M1 MIASHS - UPVM3**
+**Mémoire Pro S1 - 2025/2026**
+
+**Importation du jeu de données**
+
+```{r}
+JD = read.csv2("/Users/ardachammahamatteguene/Desktop/M1 UMPV3/Memoire Pro S1/Students_Performance.csv", header = TRUE, sep=",", dec="."); 
+head(JD)
+```
+
+**Renommer les colonnes**
+
+```{r}
+colnames(JD) = c("Genre", "Race_Ethnique", "NEP", "Repas", "CPT", "Score_Maths", "Score_Lecture", "Score_Ecriture", "Score_Total", "Score_Moyen"); head(JD)
+```
+
+**Etude du JD**
+
+```{r}
+summary(JD[, 6:10])
+str(JD)
+dim(JD)
+```
+
+
+```{r}
+unique(JD$Genre)
+unique(JD$Repas)
+unique(JD$CPT)
+unique(JD$NEP)
+unique(JD$Race_Ethnique)
+
+```
+
+**Recodage des variables catégorielles**
+
+```{r}
+# Genre : 0 = Feminin, 1 = Masculin
+JD$Genre <- factor(
+  JD$Genre,
+  levels = c(0,1),
+  labels = c("Feminin","Masculin")
+)
+
+# Repas : 0 = Gratuit/réduit, 1 = Standard
+JD$Repas <- factor(
+  JD$Repas,
+  levels = c(0,1),
+  labels = c("Gratuit_ou_reduit","Standard")
+)
+
+# Cours de préparation : 0 = Non, 1 = Oui
+JD$CPT <- factor(
+  JD$CPT,
+  levels = c(0,1),
+  labels = c("Non","Oui")
+)
+
+# Niveau d'éducation parentale (ordonné)
+JD$NEP <- factor(
+  JD$NEP,
+  levels = c("some high school", "high school", "some college",
+             "associate's degree", "bachelor's degree", "master's degree"),
+  ordered = TRUE
+)
+
+# Race / Ethnicité
+JD$Race_Ethnique <- factor(JD$Race_Ethnique)
+
+summary(JD[, c("Genre","Repas","CPT","NEP","Race_Ethnique")])
+
+
+```
+
+
+**1)  Régression linéaire multiple**
+
+```{r}
+modele_complet <- lm(
+  Score_Moyen ~ CPT + NEP + Genre + Repas + Race_Ethnique,
+  data = JD
+)
+
+summary(modele_complet)
+```
+
+**a) Diagnostics graphiques**
+
+```{r}
+par(mfrow=c(2,2))
+plot(modele_complet)
+par(mfrow=c(1,1))
+```
+
+**b) Graphes de l'effet du CPT et celui du NEP**
+
+```{r}
+# Effet du CPT
+boxplot(Score_Moyen ~ CPT, data = JD,
+        main="Score moyen selon la participation à un cours de préparation",
+        xlab="Cours de préparation aux tests", ylab="Score Moyen")
+
+# Effet du NEP
+boxplot(Score_Moyen ~ NEP, data = JD,
+        main="Score moyen selon le niveau d'éducation des parents",
+        xlab="Niveau d'éducation des parents", ylab="Score Moyen")
+
+```
+
+**c)  Sélection de variables - Forward / Backward**
+
+```{r}
+# Backward
+modele_backward <- step(
+  modele_complet,
+  direction = "backward",
+  trace = TRUE
+)
+
+# summary(modele_backward)
+
+# Forward
+modele_nul <- lm(Score_Moyen ~ 1, data = JD)
+
+modele_forward <- step(
+  modele_nul,
+  scope = formula(modele_complet),
+  direction = "forward",
+  trace = TRUE
+)
+
+# summary(modele_forward)
+
+```
+
+**d) AIC / BIC**
+
+```{r}
+AIC(modele_complet, modele_backward, modele_forward)
+BIC(modele_complet, modele_backward, modele_forward)
+```
+
+**e) Cp de Mallows**
+
+```{r}
+library(leaps)
+
+best_subset <- regsubsets(
+  Score_Moyen ~ CPT + NEP + Genre + Repas + Race_Ethnique,
+  data = JD,
+  nvmax = 6
+)
+
+summary(best_subset)
+
+# Visualisation Cp
+plot(best_subset, scale = "Cp")
+
+```
+
+---------------
+
+**2) Classification supervisée**
+
+**Création de la variable Succès**
+
+```{r}
+JD$Succes <- ifelse(JD$Score_Moyen >= 70, 1, 0)
+JD$Succes <- factor(JD$Succes, levels = c(0,1), labels = c("Echec","Succes"))
+
+table(JD$Succes)
+
+```
+
+
+**a) Régression logistique**
+
+```{r}
+modele_logit <- glm(Succes ~ CPT + NEP + Genre + Repas + Race_Ethnique,
+                    data = JD,
+                    family = binomial)
+
+summary(modele_logit)
+```
+
+
+**Prédictions & Matrice de confusion**
+
+```{r}
+pred_prob <- predict(modele_logit, type="response")
+pred_class <- ifelse(pred_prob >= 0.5, "Succes", "Echec")
+pred_class <- factor(pred_class, levels=c("Echec","Succes"))
+
+# Matrice de confusion
+table(Prediction = pred_class, Réel = JD$Succes)
+
+# Accuracy
+mean(pred_class == JD$Succes)
+
+```
+
+
+
+**ROC / AUC**
+
+```{r}
+library(pROC)
+
+roc_obj <- roc(JD$Succes, pred_prob)
+auc(roc_obj)
+plot(roc_obj, main="Courbe ROC - Régression Logistique")
+
+```
+
+
+**b) Identification des élèves à risque**
+
+
+```{r}
+# Probabilité prédite logistique
+JD$Prob_Succes <- pred_prob
+
+# Trier par probabilité croissante
+eleves_risque <- JD[order(JD$Prob_Succes),]
+head(eleves_risque[, c("Genre","NEP","Repas","CPT","Race_Ethnique","Score_Moyen","Prob_Succes")], 10)
+
+```
+
+
+------
+
+**3) Clustering**
+
+**a) Normalisation des scores**
+
+```{r}
+# Normalisation des scores
+X <- scale(JD[, c("Score_Maths","Score_Lecture","Score_Ecriture")])
+
+# Calcul WSS pour k = 1 à 10
+wss <- sapply(1:10, function(k){
+  kmeans(X, centers=k, nstart=25)$tot.withinss
+})
+
+# Plot pour visualiser le coude
+plot(1:10, wss, type="b", xlab="Nombre de clusters k", ylab="Within-cluster sum of squares", main="Méthode du coude")
+
+```
+
+
+
+**b) K optimal**
+
+```{r}
+library(cluster)
+
+sil_width <- sapply(2:10, function(k){
+  km <- kmeans(X, centers=k, nstart=25)
+  ss <- silhouette(km$cluster, dist(X))
+  mean(ss[, 3])
+})
+
+# Plot silhouette moyenne
+plot(2:10, sil_width, type="b", xlab="Nombre de clusters k", ylab="Largeur moyenne de silhouette", main="Méthode silhouette")
+
+# k optimal = max silhouette
+k_opt <- which.max(sil_width) + 1  # +1 car séquence 2:10
+k_opt
+
+
+```
+
+
+**c) Clusters**
+
+```{r}
+set.seed(123)
+kmeans_final <- kmeans(X, centers=k_opt, nstart=25)
+JD$Cluster_Kmeans <- factor(kmeans_final$cluster)
+
+# Profil académique moyen par cluster
+aggregate(JD[, c("Score_Maths","Score_Lecture","Score_Ecriture","Score_Moyen")], 
+          by=list(Cluster=JD$Cluster_Kmeans), mean)
+
+# Profil socio-économique par cluster
+table(JD$Cluster_Kmeans, JD$NEP)
+table(JD$Cluster_Kmeans, JD$Repas)
+table(JD$Cluster_Kmeans, JD$CPT)
+
+```
+
+On choisit :
+
+Cluster 1(rouge) = élèves performants
+Cluster 2(vert) = élèves moins performants
+
+**Scatter plot 3D (Maths, Lecture, Écriture)**
+
+```{r}
+library(plotly)
+
+plot_ly(JD, x = ~Score_Maths, y = ~Score_Lecture, z = ~Score_Ecriture,
+        color = ~Cluster_Kmeans, colors = c("red","green"),
+        type = "scatter3d", mode = "markers") %>%
+  layout(title = "Segmentation des élèves - K-means (k=2)",
+         scene = list(xaxis=list(title="Score Maths"),
+                      yaxis=list(title="Score Lecture"),
+                      zaxis=list(title="Score Écriture")))
+
+```
+
+
+**Pair plot / Scatter plot matrix**
+
+```{r}
+library(GGally)
+
+ggpairs(JD, columns=c("Score_Maths","Score_Lecture","Score_Ecriture"),
+        aes(color=Cluster_Kmeans)) +
+  scale_color_manual(values = c("red","green"))
+
+```
+
+
+**Histogrammes – Répartition socio-économique par cluster**
+
+```{r}
+ggplot(JD, aes(x=NEP, fill=Cluster_Kmeans)) +
+  geom_bar(position="dodge") +
+  scale_fill_manual(values = c("red","green"), name="Cluster") +
+  labs(title="Répartition du niveau d'éducation parental par cluster",
+       x="Niveau d'éducation parental",
+       y="Nombre d'élèves") +
+  theme_minimal(base_size = 14)
+
+
+ggplot(JD, aes(x=Repas, fill=Cluster_Kmeans)) +
+  geom_bar(position="dodge") +
+  scale_fill_manual(values = c("red","green"), name="Cluster") +
+  labs(title="Répartition du type de repas par cluster",
+       x="Repas",
+       y="Nombre d'élèves") +
+  theme_minimal(base_size = 14)
+
+ggplot(JD, aes(x=CPT, fill=Cluster_Kmeans)) +
+  geom_bar(position="dodge") +
+  scale_fill_manual(values = c("red","green"), name="Cluster") +
+  labs(title="Participation au CPT par cluster",
+       x="Cours de préparation au test",
+       y="Nombre d'élèves") +
+  theme_minimal(base_size = 14)
+
+
+```
+
+
+**Création de la variable Succès**
+
+
+```{r}
+# Distance et CAH
+d <- dist(scale(JD[, c("Score_Maths","Score_Lecture","Score_Ecriture")]), method = "euclidean")
+cah_res <- hclust(d, method="ward.D2")
+
+# Découpage en 2 clusters
+clusters_cah <- cutree(cah_res, k=2)
+
+# Dendrogramme avec couleurs
+library(dendextend)
+dend <- as.dendrogram(cah_res)
+dend <- color_branches(dend, k=2, col=c("red","green"))
+
+plot(dend, main="Dendrogramme CAH - k=2", ylab="Distance")
+
+```
+
+
+
+
+
+
